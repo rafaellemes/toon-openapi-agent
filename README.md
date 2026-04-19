@@ -27,6 +27,40 @@ Once installed, the agent gains all capabilities below — activated by natural 
 
 ---
 
+## Agent vs. Skill — Trade-offs
+
+This plugin ships **two activation modes**: an **Agent** and a **Skill**. They expose the same capabilities but have fundamentally different cost and isolation profiles.
+
+### Use the Agent when…
+
+You want **context isolation**: the agent runs in its own sub-session and its internal reasoning, intermediate tool calls, and raw spec fragments never appear in your main conversation thread. Useful when the API work is a side task and you don't want to pollute the primary context.
+
+**Cost:** every agent invocation cold-starts a new session — it re-reads the skill instructions, builds its own tool list, and accumulates its own context. This can consume significantly more tokens than invoking the skill directly, especially for multi-step workflows.
+
+```
+# Invoke as an agent (isolated sub-session)
+@toon-openapi-agent ingest https://api.example.com/openapi.json
+```
+
+### Use the Skill directly when…
+
+You want **efficiency**: the skill runs inline in your current session, sharing context that is already loaded. Token overhead is minimal because no new session is bootstrapped. The trade-off is that any intermediate output and context stay in your main thread.
+
+```
+# Invoke as a skill (inline, same session)
+/skill-toon-openapi ingest https://api.example.com/openapi.json
+```
+
+### Summary
+
+| | Agent | Skill |
+|---|---|---|
+| Context isolation | Yes — sub-session | No — main thread |
+| Token cost | Higher (cold start) | Lower (shared context) |
+| Best for | Side tasks, clean main thread | Primary API work, token budget |
+
+---
+
 ## Installation
 
 ### From the Anthropic Marketplace
@@ -181,6 +215,40 @@ Uma vez instalado, o agente ganha todas as capacidades abaixo — ativadas por l
 | "Valida esse JSON contra o contrato" | Valida o payload contra o schema ingerido |
 | "Compara essa API com a v2 que acabei de ingerir" | Faz diff entre duas versões e aponta breaking changes |
 | "Exporta o contexto TooN para usar em outra thread" | Gera bloco compacto e auto-explicativo |
+
+---
+
+## Agente vs. Skill — Trade-offs
+
+Este plugin disponibiliza **dois modos de ativação**: um **Agente** e uma **Skill**. Ambos expõem as mesmas capacidades, mas têm perfis de custo e isolamento fundamentalmente diferentes.
+
+### Use o Agente quando…
+
+Você quiser **isolamento de contexto**: o agente roda em uma sub-sessão própria — seu raciocínio interno, chamadas de ferramentas intermediárias e fragmentos brutos do spec nunca aparecem na thread principal. Ideal quando o trabalho com a API é uma tarefa lateral e você não quer poluir o contexto primário.
+
+**Custo:** cada invocação do agente inicia uma nova sessão do zero — ele relê as instruções da skill, reconstrói a lista de ferramentas e acumula seu próprio contexto. Isso pode consumir significativamente mais tokens do que invocar a skill diretamente, especialmente em fluxos com múltiplos passos.
+
+```
+# Invocar como agente (sub-sessão isolada)
+@toon-openapi-agent ingest https://api.example.com/openapi.json
+```
+
+### Use a Skill diretamente quando…
+
+Você quiser **eficiência**: a skill roda inline na sua sessão atual, compartilhando o contexto já carregado. O overhead de tokens é mínimo porque nenhuma nova sessão é inicializada. O trade-off é que toda saída intermediária e contexto ficam na sua thread principal.
+
+```
+# Invocar como skill (inline, mesma sessão)
+/skill-toon-openapi ingest https://api.example.com/openapi.json
+```
+
+### Resumo
+
+| | Agente | Skill |
+|---|---|---|
+| Isolamento de contexto | Sim — sub-sessão | Não — thread principal |
+| Custo em tokens | Maior (cold start) | Menor (contexto compartilhado) |
+| Melhor para | Tarefas laterais, thread limpa | Trabalho principal com API, budget de tokens |
 
 ---
 
