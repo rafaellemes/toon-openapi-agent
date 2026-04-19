@@ -1,0 +1,413 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "OAS3 Full Params Test",
+    "version": "v1"
+  },
+  "servers": [
+    { "url": "https://api.example.com/v1" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Item": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "id":    { "type": "integer" },
+          "name":  { "type": "string" },
+          "active":{ "type": "boolean" }
+        }
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+
+    "/query-header": {
+      "get": {
+        "operationId": "getQueryHeader",
+        "summary": "query and header params",
+        "parameters": [
+          { "name": "limit",     "in": "query",  "required": false, "schema": { "type": "integer" } },
+          { "name": "offset",    "in": "query",  "required": false, "schema": { "type": "integer" } },
+          { "name": "X-Api-Key", "in": "header", "required": true,  "schema": { "type": "string"  } },
+          { "name": "X-Tenant",  "in": "header", "required": false, "schema": { "type": "string"  } }
+        ],
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+
+    "/path-cookie/{id}": {
+      "get": {
+        "operationId": "getPathCookie",
+        "summary": "path param (excluded) and cookie param",
+        "parameters": [
+          { "name": "id",      "in": "path",   "required": true,  "schema": { "type": "integer" } },
+          { "name": "session", "in": "cookie", "required": false, "schema": { "type": "string"  } }
+        ],
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+
+    "/body-json": {
+      "post": {
+        "operationId": "postBodyJson",
+        "summary": "application/json body",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Item" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created" }
+        }
+      }
+    },
+
+    "/body-xml": {
+      "post": {
+        "operationId": "postBodyXml",
+        "summary": "application/xml body",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/xml": {
+              "schema": { "$ref": "#/components/schemas/Item" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created" }
+        }
+      }
+    },
+
+    "/body-ld-json": {
+      "post": {
+        "operationId": "postBodyLdJson",
+        "summary": "application/ld+json body",
+        "requestBody": {
+          "content": {
+            "application/ld+json": {
+              "schema": { "$ref": "#/components/schemas/Item" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created" }
+        }
+      }
+    },
+
+    "/body-vnd-json": {
+      "post": {
+        "operationId": "postBodyVndJson",
+        "summary": "application/vnd.api+json body",
+        "requestBody": {
+          "content": {
+            "application/vnd.api+json": {
+              "schema": { "$ref": "#/components/schemas/Item" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Created" }
+        }
+      }
+    },
+
+    "/form-urlencoded": {
+      "post": {
+        "operationId": "postFormUrlencoded",
+        "summary": "application/x-www-form-urlencoded",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "required": ["username"],
+                "properties": {
+                  "username": { "type": "string" },
+                  "password": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+
+    "/form-multipart": {
+      "post": {
+        "operationId": "postFormMultipart",
+        "summary": "multipart/form-data",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "description": { "type": "string" },
+                  "file":        { "type": "string", "format": "binary" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+
+    "/body-binary": {
+      "post": {
+        "operationId": "postBodyBinary",
+        "summary": "application/octet-stream binary upload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/octet-stream": {}
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+
+    "/body-image": {
+      "post": {
+        "operationId": "postBodyImage",
+        "summary": "image/png upload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "image/png": {}
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+
+    "/body-pdf": {
+      "post": {
+        "operationId": "postBodyPdf",
+        "summary": "application/pdf upload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/pdf": {}
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+
+    "/body-text": {
+      "post": {
+        "operationId": "postBodyText",
+        "summary": "text/plain body",
+        "requestBody": {
+          "content": {
+            "text/plain": {
+              "schema": { "type": "string" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+
+    "/response-headers": {
+      "get": {
+        "operationId": "getResponseHeaders",
+        "summary": "response with headers",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "X-RateLimit-Limit":     { "schema": { "type": "integer" } },
+              "X-RateLimit-Remaining": { "schema": { "type": "integer" } },
+              "Location":              { "schema": { "type": "string"  } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Item" }
+              }
+            }
+          }
+        }
+      }
+    },
+
+    "/stream": {
+      "get": {
+        "operationId": "getStream",
+        "summary": "text/event-stream SSE",
+        "responses": {
+          "200": {
+            "description": "SSE stream",
+            "content": {
+              "text/event-stream": {}
+            }
+          }
+        }
+      }
+    },
+
+    "/create-resource": {
+      "post": {
+        "operationId": "createResource",
+        "summary": "POST returning 201 with Location header",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Item" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "headers": {
+              "Location":    { "schema": { "type": "string"  } },
+              "X-Request-Id":{ "schema": { "type": "string"  } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Item" }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "409": {
+            "description": "Conflict",
+            "headers": {
+              "X-Conflict-Id": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+
+    "/paginated": {
+      "get": {
+        "operationId": "listPaginated",
+        "summary": "GET with pagination response headers",
+        "parameters": [
+          { "name": "page",     "in": "query", "required": false, "schema": { "type": "integer" } },
+          { "name": "per_page", "in": "query", "required": false, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "X-Total-Count":  { "schema": { "type": "integer" } },
+              "X-Page":         { "schema": { "type": "integer" } },
+              "X-Total-Pages":  { "schema": { "type": "integer" } },
+              "Link":           { "schema": { "type": "string"  } }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/Item" }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request"
+          }
+        }
+      }
+    },
+
+    "/resources/{id}": {
+      "delete": {
+        "operationId": "deleteResource",
+        "summary": "DELETE with headers on multiple status codes",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content",
+            "headers": {
+              "X-Request-Id":  { "schema": { "type": "string"  } },
+              "X-Deleted-At":  { "schema": { "type": "string"  } }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "headers": {
+              "X-Request-Id": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+
+    "/mixed/{id}": {
+      "put": {
+        "operationId": "putMixed",
+        "summary": "all param types combined",
+        "parameters": [
+          { "name": "id",        "in": "path",   "required": true,  "schema": { "type": "integer" } },
+          { "name": "version",   "in": "query",  "required": false, "schema": { "type": "string"  } },
+          { "name": "X-Trace",   "in": "header", "required": false, "schema": { "type": "string"  } },
+          { "name": "pref",      "in": "cookie", "required": false, "schema": { "type": "string"  } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Item" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "headers": {
+              "X-Updated-At": { "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Item" }
+              }
+            }
+          }
+        }
+      }
+    }
+
+  }
+}

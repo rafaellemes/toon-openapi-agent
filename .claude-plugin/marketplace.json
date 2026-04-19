@@ -1,0 +1,43 @@
+{
+  "name": "toon-openapi-agent",
+  "owner": {
+    "name": "Rafael Lemes",
+    "email": "rafael.ads09@gmail.com"
+  },
+  "metadata": {
+    "description": "Specialized Claude Code agent for OpenAPI/Swagger APIs with TooN compact notation.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "toon-openapi-agent",
+      "source": {
+        "source": "github",
+        "repo": "rafaellemes/toon-openapi-agent",
+        "ref": "main"
+      },
+      "description": "Specialized agent for OpenAPI/Swagger APIs using TooN compact notation. Ingests specs, answers questions, generates code, validates payloads, compares versions, creates tests and exports context — reducing token consumption by up to 90%.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Rafael Lemes",
+        "email": "rafael.ads09@gmail.com"
+      },
+      "homepage": "https://github.com/rafaellemes/toon-openapi-agent",
+      "repository": "https://github.com/rafaellemes/toon-openapi-agent",
+      "license": "MIT",
+      "keywords": [
+        "openapi",
+        "swagger",
+        "api",
+        "toon",
+        "code-generation",
+        "rest",
+        "http-client",
+        "testing",
+        "validation",
+        "diff"
+      ],
+      "category": "development"
+    }
+  ]
+}
