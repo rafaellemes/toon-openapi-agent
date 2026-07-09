@@ -1,0 +1,88 @@
+{
+  "openapi": "3.0.0",
+  "info": { "title": "Constraints Test API", "version": "1.0.0" },
+  "servers": [{ "url": "https://api.example.com/v1" }],
+  "paths": {
+    "/items/{itemId}": {
+      "get": {
+        "operationId": "getItem",
+        "summary": "Get an item",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 9999, "format": "int32" }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["active", "inactive", "pending"],
+              "default": "active"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id":   { "type": "integer", "format": "int32" },
+                    "code": { "type": "string", "pattern": "^[A-Z]{3}$" },
+                    "status": {
+                      "type": "string",
+                      "enum": ["active", "inactive", "pending"]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateItem",
+        "summary": "Update an item",
+        "parameters": [
+          {
+            "name": "itemId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer", "minimum": 1, "maximum": 9999 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name":     { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "quantity": { "type": "integer", "minimum": 0, "multipleOf": 5 },
+                  "category": {
+                    "type": "string",
+                    "enum": ["electronics", "clothing", "food", "books", "sports", "toys", "other"],
+                    "default": "other"
+                  },
+                  "nullable_field": { "type": "string", "nullable": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "updated" },
+          "400": { "description": "invalid" }
+        }
+      }
+    }
+  }
+}

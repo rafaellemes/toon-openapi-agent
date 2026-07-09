@@ -26,14 +26,63 @@ def extract_meta(mapping):
     return {"base_url": base_url, "auth": auth}
 
 def classify(rule):
-    breaking = ["endpoint_removed", "param_type_changed", "param_required_added", "param_removed", "method_changed", "base_url_changed", "auth_scheme_changed"]
-    non_breaking = ["endpoint_added", "param_optional_added"]
+    breaking = ["endpoint_removed", "param_type_changed", "param_required_added", "param_removed",
+                "method_changed", "base_url_changed", "auth_scheme_changed", "constraint_tightened"]
+    non_breaking = ["endpoint_added", "param_optional_added", "constraint_relaxed"]
     if rule in breaking:
         return "🔴 BREAKING", "high"
     elif rule in non_breaking:
         return "🟢 NON-BREAKING", "low"
     else:
         return "⚪ INFO", "low"
+
+def _diff_constraints(b_c, t_c):
+    """Compara dois dicts de param_constraints e retorna lista de mudanças."""
+    changes = []
+    all_tokens = set(b_c) | set(t_c)
+    for token in all_tokens:
+        bc = b_c.get(token, {})
+        tc = t_c.get(token, {})
+        if bc == tc:
+            continue
+        for key in set(bc) | set(tc):
+            bv = bc.get(key)
+            tv = tc.get(key)
+            if bv == tv:
+                continue
+            # Enum: remover valor = breaking; adicionar = non-breaking
+            if key == "enum":
+                b_set = set(bv or [])
+                t_set = set(tv or [])
+                removed = b_set - t_set
+                added = t_set - b_set
+                if removed:
+                    changes.append({"rule": "constraint_tightened",
+                                    "detail": f"Param {token}: enum removeu valores {sorted(removed)}"})
+                if added:
+                    changes.append({"rule": "constraint_relaxed",
+                                    "detail": f"Param {token}: enum adicionou valores {sorted(added)}"})
+            # Numeric upper bounds: reduzir = breaking
+            elif key in ("maximum", "maxLength", "maxItems", "exclusiveMaximum"):
+                if bv is not None and tv is not None and tv < bv:
+                    changes.append({"rule": "constraint_tightened",
+                                    "detail": f"Param {token}: {key} reduziu de {bv} para {tv}"})
+                elif tv is not None and (bv is None or tv > bv):
+                    changes.append({"rule": "constraint_relaxed",
+                                    "detail": f"Param {token}: {key} aumentou de {bv} para {tv}"})
+            # Numeric lower bounds: aumentar = breaking
+            elif key in ("minimum", "minLength", "minItems", "exclusiveMinimum"):
+                if bv is not None and tv is not None and tv > bv:
+                    changes.append({"rule": "constraint_tightened",
+                                    "detail": f"Param {token}: {key} aumentou de {bv} para {tv}"})
+                elif tv is not None and (bv is None or tv < bv):
+                    changes.append({"rule": "constraint_relaxed",
+                                    "detail": f"Param {token}: {key} reduziu de {bv} para {tv}"})
+            # pattern/format/multipleOf: qualquer mudança = info
+            else:
+                changes.append({"rule": "constraint_changed",
+                                "detail": f"Param {token}: {key} mudou de {bv!r} para {tv!r}"})
+    return changes
 
 def diff_mappings(base, target):
     added = []
@@ -71,6 +120,12 @@ def diff_mappings(base, target):
                 if k not in tp:
                     changes.append({"rule": "param_removed", "detail": f"Param {k} foi removido."})
                     
+        # Constraint changes
+        changes.extend(_diff_constraints(
+            b_op.get("param_constraints", {}),
+            t_op.get("param_constraints", {})
+        ))
+
         # Other simple checks to fulfill standard rules
         if b_op.get("method") != t_op.get("method"):
             changes.append({"rule": "method_changed", "detail": "Método HTTP mudou."})

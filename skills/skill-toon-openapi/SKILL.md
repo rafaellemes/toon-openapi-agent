@@ -83,9 +83,25 @@ Ao analisar o arquivo `toon.txt`, utilize este glossário de decodificação:
 - **Tipos de Dado**: `s`=string, `i`=integer, `b`=boolean, `a`=array, `o`=object
 - **Marcadores**: `!`=obrigatório, `?`=opcional
 - **Prefixos de Parâmetro de Requisição**:
-  `q:`=query param · `h:`=header · `c:`=cookie · `f:`=form field (urlencoded/multipart)
+  `p:`=path param · `q:`=query param · `h:`=header · `c:`=cookie · `f:`=form field (urlencoded/multipart)
   `body.`=campo de body JSON/XML · `body:s`=body texto primitivo · `binary`=upload binário · `stream`=SSE
 - **Prefixo de Response Header**: `rh:`=header da resposta
+- **Constraints inline** (sufixo `{...}` colado ao token, apenas no toon.txt):
+  `enum:a|b|c` · `def:V` · `min:N` · `max:N` · `minLen:N` · `maxLen:N` · `fmt:X` · `mult:N` · `re:…` · `null`
+  Enums longos são truncados (`…(+N)`). A lista completa e todas as constraints integrais
+  ficam em `mapping.json` nos campos `param_constraints` e `response_constraints`
+  (indexados pelo token puro, ex: `"body.status:s?"`). Consulte-os via `jq` para geração
+  de código, validação e diff.
+- **Aninhamento**: `body.a.b.c` = objeto aninhado; `body.arr[]` = item de array;
+  `body.mapa.{*}` = chave livre (`additionalProperties`).
+- **Marcadores de nó** (sufixo no token): `~oneOf`/`~anyOf` = variantes de composição
+  mescladas como opcionais; `~circular` = referência circular interrompida;
+  `~deep` = profundidade máxima atingida.
+- **toon.txt é COMPACTO por design** (economia de tokens): mostra apenas o 1º nível dos
+  bodies com `…` indicando aninhamento, e respostas de erro (não-2xx) só como código de
+  status. A **árvore recursiva completa** (todos os níveis, todas as respostas) vive no
+  `mapping.json` — SEMPRE consulte-o via `jq` (`.<opId>.params_toon`,
+  `.<opId>.responses_toon`) para obter o contrato integral ao gerar código.
 
 ---
 
@@ -114,6 +130,23 @@ Após gerar código de integração, SEMPRE:
 2. Chamar `validate_payload.py` contra o mapping
 3. Válido → entregar | Inválido → corrigir silenciosamente (máx. 2x)
 
+## ⚠️ Constraints DEVEM ser IMPOSTAS no código gerado
+
+As constraints do `mapping.json` (`param_constraints`/`response_constraints`: `enum`,
+`pattern`, `min`/`max`, `minLength`/`maxLength`, `multipleOf`, obrigatoriedade) NÃO são
+decoração. O código gerado **DEVE validá-las client-side ANTES de enviar a requisição** —
+falhar cedo, localmente. **Comentário descrevendo a constraint não basta.**
+
+Motivo: uma chamada que já se sabe inválida gasta uma requisição do *bucket* de rate-limit
+da API (crítico p/ Pix) e retorna 400 previsível.
+
+- **Spring Boot / Java (Bean Validation):** `@NotNull`/`@NotBlank`, `@Size`, `@Pattern`,
+  `@Min`/`@Max` ou `@DecimalMin`/`@DecimalMax`, `@Valid` em aninhados, `enum` Java para `enum`.
+- **Java puro / sem framework:** guardas que lançam `IllegalArgumentException` antes de enviar
+  (`Objects.requireNonNull`, `Pattern.matches`, checagem de tamanho/faixa, `enum` Java).
+- **Outras linguagens:** equivalente idiomático (Pydantic, Zod/class-validator, `validator` Go…).
+- Enums → tipo/enum de primeira classe. Detalhe por stack em `clientgen-api.md`.
+
 ---
 
 ## Regras Globais
@@ -122,6 +155,8 @@ Após gerar código de integração, SEMPRE:
 2. NUNCA `cat` do `mapping.json` completo — sempre `jq` cirúrgico.
 3. SEMPRE resolver contexto antes de gerar código.
 4. SEMPRE validar payload gerado antes de entregar.
+4b. SEMPRE impor as constraints do mapping NO CÓDIGO gerado (validação client-side antes da
+    chamada) — nunca só como comentário. Ver seção "Constraints DEVEM ser IMPOSTAS".
 5. SEMPRE informar custo estimado em tokens.
 6. Se endpoint não existir no `toon.txt` — declarar e listar disponíveis.
 7. Se um namespace faltar em `.toon_apis/apis/` — instruir a usar ingest-api.

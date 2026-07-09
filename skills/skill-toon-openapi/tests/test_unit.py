@@ -1,13 +1,20 @@
 """
 Testes unitários — sem dependência de rede.
-Cobre: extract_type, extract_base_url, slugify, generate_artifacts, log_metrics.
+Cobre: extract_type, extract_base_url, slugify, generate_artifacts, log_metrics,
+       extract_constraints, annotate, validate_constraint, build_happy_payload, diff_constraints.
 """
 import json, sys, pytest
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts/ingest"))
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts/consult"))
-from transform_toon import generate_artifacts, extract_type, extract_base_url, slugify, extract_auth
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts/validate"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts/testgen"))
+sys.path.insert(0, str(Path(__file__).parent.parent / "scripts/diff"))
+from transform_toon import generate_artifacts, extract_type, extract_base_url, slugify, extract_auth, extract_constraints, annotate
 from log_metrics import log_token_usage
+from validate_payload import validate_payload, validate_constraint
+from generate_tests import build_happy_payload
+from diff_specs import _diff_constraints
 
 @pytest.fixture
 def spec_completa():
@@ -195,8 +202,12 @@ class TestGenerateArtifactsToon:
         toon, _ = generate_artifacts(spec_swagger2_mock)
         assert "BASE: https://legacy.exemplo.com/api" in toon
     def test_evita_loop_infinito_circular_arrays(self, spec_circular):
-        toon, _ = generate_artifacts(spec_circular)
-        assert "body[][][][][]:a!" in toon  # Limite máximo 5
+        # Guarda anti-circular: não trava e marca o nó recorrente com ~circular.
+        toon, mapping = generate_artifacts(spec_circular)
+        assert "body:a!" in toon
+        tokens = mapping["postLoop"]["params_toon"]
+        assert any("~circular" in t for t in tokens)
+        assert len(tokens) < 20  # não expandiu infinitamente
     def test_primitive_root_body(self, spec_primitive_body):
         toon, _ = generate_artifacts(spec_primitive_body)
         assert "Req: binary" in toon
@@ -308,6 +319,367 @@ class TestExtractAuth:
         toon, _ = generate_artifacts(spec_sem_servers)
         assert "AUTH:" in toon
         assert "não definida" in toon
+
+
+CONSTRAINTS_FIXTURE = Path(__file__).parent / "fixtures" / "oas3_constraints.json"
+
+@pytest.fixture
+def constraints_spec():
+    return json.loads(CONSTRAINTS_FIXTURE.read_text())
+
+
+class TestExtractConstraints:
+    def test_string_with_enum_and_default(self):
+        schema = {"type": "string", "enum": ["a", "b", "c"], "default": "a"}
+        c = extract_constraints(schema)
+        assert c["enum"] == ["a", "b", "c"]
+        assert c["default"] == "a"
+
+    def test_integer_with_min_max_format(self):
+        schema = {"type": "integer", "minimum": 1, "maximum": 100, "format": "int32"}
+        c = extract_constraints(schema)
+        assert c["minimum"] == 1
+        assert c["maximum"] == 100
+        assert c["format"] == "int32"
+
+    def test_string_with_length_and_pattern(self):
+        schema = {"type": "string", "minLength": 2, "maxLength": 50, "pattern": "^[A-Z]+$"}
+        c = extract_constraints(schema)
+        assert c["minLength"] == 2
+        assert c["maxLength"] == 50
+        assert c["pattern"] == "^[A-Z]+$"
+
+    def test_array_inherits_items_enum(self):
+        schema = {"type": "array", "items": {"type": "string", "enum": ["x", "y"]}}
+        c = extract_constraints(schema)
+        assert c["enum"] == ["x", "y"]
+
+    def test_nullable_true(self):
+        schema = {"type": "string", "nullable": True}
+        c = extract_constraints(schema)
+        assert c.get("nullable") is True
+
+    def test_empty_schema_returns_empty(self):
+        assert extract_constraints({}) == {}
+        assert extract_constraints(None) == {}
+
+    def test_multiple_of(self):
+        schema = {"type": "integer", "multipleOf": 5}
+        c = extract_constraints(schema)
+        assert c["multipleOf"] == 5
+
+
+class TestAnnotate:
+    def test_no_constraints_returns_token(self):
+        assert annotate("body.name:s!", {}) == "body.name:s!"
+
+    def test_enum_inline(self):
+        result = annotate("q:status:s?", {"enum": ["a", "b", "c"], "default": "a"})
+        assert "{" in result and "enum:a|b|c" in result and "def:a" in result
+
+    def test_enum_truncation(self):
+        vals = ["v1", "v2", "v3", "v4", "v5", "v6", "v7"]
+        result = annotate("q:x:s?", {"enum": vals})
+        assert "…(+1)" in result
+
+    def test_min_max(self):
+        result = annotate("p:id:i!", {"minimum": 1, "maximum": 100, "format": "int32"})
+        assert "min:1" in result and "max:100" in result and "fmt:int32" in result
+
+    def test_nullable(self):
+        result = annotate("body.x:s?", {"nullable": True})
+        assert "null" in result
+
+    def test_pattern_short(self):
+        # patterns sem "}" são renderizados inline; com "}" usam "…" para não quebrar a sintaxe TooN
+        result_safe = annotate("body.code:s!", {"pattern": "^[A-Z]+$"})
+        assert "re:^[A-Z]+$" in result_safe
+        result_brace = annotate("body.code:s!", {"pattern": "^[A-Z]{3}$"})
+        assert "re:…" in result_brace
+
+    def test_pattern_with_brace_uses_ellipsis(self):
+        result = annotate("body.x:s!", {"pattern": "^{complex}[pattern]$"})
+        assert "re:…" in result
+
+
+class TestGenerateArtifactsConstraints:
+    def test_path_param_always_in_params_toon(self, constraints_spec):
+        _, mapping = generate_artifacts(constraints_spec)
+        assert any(t.startswith("p:itemId") for t in mapping["getItem"]["params_toon"])
+
+    def test_path_param_with_constraint_in_mapping(self, constraints_spec):
+        _, mapping = generate_artifacts(constraints_spec)
+        pc = mapping["getItem"].get("param_constraints", {})
+        path_token = next((k for k in pc if k.startswith("p:itemId")), None)
+        assert path_token is not None
+        assert pc[path_token]["minimum"] == 1
+        assert pc[path_token]["maximum"] == 9999
+
+    def test_query_enum_in_param_constraints(self, constraints_spec):
+        _, mapping = generate_artifacts(constraints_spec)
+        pc = mapping["getItem"].get("param_constraints", {})
+        status_token = next((k for k in pc if "status" in k and k.startswith("q:")), None)
+        assert status_token is not None
+        assert pc[status_token]["enum"] == ["active", "inactive", "pending"]
+        assert pc[status_token]["default"] == "active"
+
+    def test_body_maxlength_in_constraints(self, constraints_spec):
+        _, mapping = generate_artifacts(constraints_spec)
+        pc = mapping["updateItem"].get("param_constraints", {})
+        name_token = next((k for k in pc if "name" in k and "body." in k), None)
+        assert name_token is not None
+        assert pc[name_token]["maxLength"] == 100
+
+    def test_response_constraints_enum(self, constraints_spec):
+        _, mapping = generate_artifacts(constraints_spec)
+        rc = mapping["getItem"].get("response_constraints", {})
+        assert "200" in rc
+        status_tok = next((k for k in rc["200"] if "status" in k), None)
+        assert status_tok is not None
+        assert "active" in rc["200"][status_tok]["enum"]
+
+    def test_toon_inline_annotation(self, constraints_spec):
+        toon, _ = generate_artifacts(constraints_spec)
+        assert "p:itemId:i!{" in toon
+        assert "enum:active|inactive|pending" in toon
+
+    def test_toon_path_param_without_constraint_no_braces(self):
+        spec = {
+            "info": {"title": "T"}, "servers": [{"url": "https://x.com"}],
+            "paths": {"/a/{id}": {"get": {
+                "operationId": "getA",
+                "parameters": [{"name": "id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                "responses": {"200": {}}
+            }}}
+        }
+        toon, _ = generate_artifacts(spec)
+        assert "p:id:s!" in toon
+        assert "{" not in toon.split("p:id:s!")[1].split("\n")[0]
+
+    def test_params_toon_token_stays_pure(self, constraints_spec):
+        _, mapping = generate_artifacts(constraints_spec)
+        for token in mapping["getItem"]["params_toon"]:
+            assert "{" not in token
+
+    def test_no_constraints_keys_omitted(self):
+        spec = {
+            "info": {"title": "T"}, "servers": [{"url": "https://x.com"}],
+            "paths": {"/a": {"get": {
+                "operationId": "listA",
+                "parameters": [{"name": "page", "in": "query", "required": False, "schema": {"type": "integer"}}],
+                "responses": {"200": {}}
+            }}}
+        }
+        _, mapping = generate_artifacts(spec)
+        assert "param_constraints" not in mapping["listA"]
+        assert "response_constraints" not in mapping["listA"]
+
+
+class TestValidateConstraints:
+    def _make_entry(self, params_toon, param_constraints=None):
+        return {"params_toon": params_toon, "param_constraints": param_constraints or {}}
+
+    def test_enum_invalid_is_error(self):
+        entry = self._make_entry(
+            ["body.status:s!"],
+            {"body.status:s!": {"enum": ["a", "b", "c"]}}
+        )
+        result = validate_payload(entry, {"status": "invalid"})
+        assert not result["is_valid"]
+        errors = [e for e in result["errors"] if "enum" in e["error"]]
+        assert errors and "ERRO" in errors[0]["severity"]
+
+    def test_enum_valid_passes(self):
+        entry = self._make_entry(
+            ["body.status:s!"],
+            {"body.status:s!": {"enum": ["a", "b", "c"]}}
+        )
+        result = validate_payload(entry, {"status": "a"})
+        assert result["is_valid"]
+
+    def test_maxlength_violation_is_warning(self):
+        entry = self._make_entry(
+            ["body.name:s!"],
+            {"body.name:s!": {"maxLength": 5}}
+        )
+        result = validate_payload(entry, {"name": "toolongvalue"})
+        warnings = [e for e in result["errors"] if "maxLength" in e["error"]]
+        assert warnings and "AVISO" in warnings[0]["severity"]
+
+    def test_minimum_violation_is_warning(self):
+        entry = self._make_entry(
+            ["body.qty:i!"],
+            {"body.qty:i!": {"minimum": 1}}
+        )
+        result = validate_payload(entry, {"qty": 0})
+        warnings = [e for e in result["errors"] if "mínimo" in e["error"]]
+        assert warnings and "AVISO" in warnings[0]["severity"]
+
+    def test_pattern_violation_is_warning(self):
+        entry = self._make_entry(
+            ["body.code:s!"],
+            {"body.code:s!": {"pattern": "^[A-Z]{3}$"}}
+        )
+        result = validate_payload(entry, {"code": "abc"})
+        warnings = [e for e in result["errors"] if "pattern" in e["error"]]
+        assert warnings and "AVISO" in warnings[0]["severity"]
+
+    def test_no_constraints_no_extra_errors(self):
+        entry = self._make_entry(["body.name:s!"])
+        result = validate_payload(entry, {"name": "hello"})
+        assert result["is_valid"]
+
+
+class TestTestgenConstraints:
+    def test_enum_uses_first_value(self):
+        params = ["body.status:s!"]
+        pc = {"body.status:s!": {"enum": ["placed", "approved"]}}
+        payload = build_happy_payload(params, pc)
+        assert payload["status"] == "placed"
+
+    def test_default_used_when_no_enum(self):
+        params = ["body.active:b?"]
+        pc = {"body.active:b?": {"default": False}}
+        payload = build_happy_payload(params, pc)
+        assert payload["active"] is False
+
+    def test_minimum_used_for_integer(self):
+        params = ["body.qty:i?"]
+        pc = {"body.qty:i?": {"minimum": 10}}
+        payload = build_happy_payload(params, pc)
+        assert payload["qty"] == 10
+
+    def test_no_constraints_uses_defaults(self):
+        params = ["body.name:s!", "body.count:i?", "body.flag:b?"]
+        payload = build_happy_payload(params)
+        assert isinstance(payload["name"], str)
+        assert isinstance(payload["count"], int)
+        assert isinstance(payload["flag"], bool)
+
+
+class TestDiffConstraints:
+    def test_enum_removal_is_breaking(self):
+        b = {"tok": {"enum": ["a", "b", "c"]}}
+        t = {"tok": {"enum": ["a", "b"]}}
+        changes = _diff_constraints(b, t)
+        assert any(c["rule"] == "constraint_tightened" for c in changes)
+
+    def test_enum_addition_is_non_breaking(self):
+        b = {"tok": {"enum": ["a", "b"]}}
+        t = {"tok": {"enum": ["a", "b", "c"]}}
+        changes = _diff_constraints(b, t)
+        assert any(c["rule"] == "constraint_relaxed" for c in changes)
+
+    def test_maxlength_reduction_is_breaking(self):
+        b = {"tok": {"maxLength": 100}}
+        t = {"tok": {"maxLength": 20}}
+        changes = _diff_constraints(b, t)
+        assert any(c["rule"] == "constraint_tightened" for c in changes)
+
+    def test_minimum_increase_is_breaking(self):
+        b = {"tok": {"minimum": 0}}
+        t = {"tok": {"minimum": 5}}
+        changes = _diff_constraints(b, t)
+        assert any(c["rule"] == "constraint_tightened" for c in changes)
+
+    def test_no_change_no_diff(self):
+        c = {"tok": {"enum": ["a", "b"], "maxLength": 50}}
+        assert _diff_constraints(c, c) == []
+
+    def test_empty_base_no_breaking(self):
+        changes = _diff_constraints({}, {"tok": {"maxLength": 50}})
+        assert all(c["rule"] != "constraint_tightened" for c in changes)
+
+
+STRUCTURAL_FIXTURE = Path(__file__).parent / "fixtures" / "oas3_structural.json"
+
+@pytest.fixture(scope="module")
+def structural():
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent.parent / "scripts/ingest"))
+    from parse_spec import load_spec
+    spec = load_spec(str(STRUCTURAL_FIXTURE))
+    toon, mapping = generate_artifacts(spec)
+    return toon, mapping
+
+
+class TestStructuralFidelity:
+    """Perenidade: $ref em qualquer fronteira, composição, recursão, additionalProperties."""
+
+    def _tokens(self, mapping, op):
+        return mapping[op]["params_toon"]
+
+    def test_parameter_ref_resolved(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createWidget")
+        assert "q:page:i?" in toks
+        assert not any(":None:" in t or t.startswith("q:None") for t in toks)
+
+    def test_requestbody_ref_resolved(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createWidget")
+        assert any(t.startswith("body.name:") for t in toks)
+
+    def test_allof_merges_properties_and_required(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createWidget")
+        assert "body.id:i!" in toks      # required herdado de Base
+        assert "body.name:s!" in toks    # required do topo de Widget
+
+    def test_nested_array_of_ref_objects(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createWidget")
+        assert "body.tags:a?" in toks
+        assert "body.tags[].key:s?" in toks
+
+    def test_additional_properties_schema_wildcard(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createWidget")
+        assert "body.meta.{*}.key:s?" in toks
+
+    def test_additional_properties_true(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createWidget")
+        assert "body.freeform.{*}:s?" in toks
+
+    def test_additional_properties_false_no_wildcard(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createWidget")
+        assert "body.closed:o?" in toks
+        assert not any(t.startswith("body.closed.{*}") for t in toks)
+
+    def test_not_keyword_does_not_crash(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createWidget")
+        assert any(t.startswith("body.forbidden:") for t in toks)
+
+    def test_oneof_merges_variants_as_optional(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createContact")
+        assert any("~oneOf" in t for t in toks)
+        assert "body.email:s?" in toks
+        assert "body.phone:s?" in toks
+
+    def test_circular_ref_guarded(self, structural):
+        _, mapping = structural
+        toks = self._tokens(mapping, "createNode")
+        assert any("~circular" in t for t in toks)
+        assert len(toks) < 20
+
+    def test_constraints_survive_composition(self, structural):
+        _, mapping = structural
+        pc = mapping["createWidget"].get("param_constraints", {})
+        assert pc.get("body.id:i!", {}).get("format") == "int64"
+        assert pc.get("body.name:s!", {}).get("maxLength") == 50
+        assert pc.get("body.kind:s?", {}).get("enum") == ["a", "b", "c"]
+        assert pc.get("q:page:i?", {}).get("minimum") == 1
+
+    def test_toon_stays_compact(self, structural):
+        toon, _ = structural
+        # Toon compacto: linhas Req não devem despejar árvore profunda; '…' quando trunca.
+        req_lines = [l for l in toon.splitlines() if l.strip().startswith("Req:")]
+        assert req_lines
+        assert all(len(l) < 400 for l in req_lines)
 
 
 class TestLogMetrics:

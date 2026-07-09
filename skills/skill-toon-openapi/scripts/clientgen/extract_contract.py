@@ -22,39 +22,92 @@ def filter_operations(mapping, op_id, tag):
         return res
     return mapping.copy()
 
-def parse_params(params_toon):
+_LOC = {"p": "path", "q": "query", "h": "header", "c": "cookie", "f": "form"}
+
+def parse_params(params_toon, param_constraints=None):
     body = []
     other = []
-    
+    if param_constraints is None:
+        param_constraints = {}
+
     exp_map = {"s": "string", "i": "integer", "b": "boolean", "a": "array", "o": "object"}
-    
+
     for p in params_toon:
         if ":" not in p:
             continue
-        parts = p.split(":")
-        name = parts[0]
-        treq = parts[1]
-        t = treq[0] if len(treq) > 0 else "s"
-        req = False
-        if len(treq) > 1 and treq[1] == "!":
-            req = True
-            
-        is_body = name.startswith("body.")
-        if is_body:
-            name = name[5:]
-            
+        head = p.split(":", 1)[0]
+        # Prefixos não-body: p:/q:/h:/c:/f: (location:name:typemarker)
+        if head in _LOC:
+            location = _LOC[head]
+            name, _, treq = p.split(":", 1)[1].partition(":")
+            is_body = False
+        elif p == "body" or p.startswith("body."):
+            location = "body"
+            name_part, _, treq = p.partition(":")
+            name = "" if name_part == "body" else name_part[5:]
+            is_body = True
+        elif p.startswith("body:"):  # corpo primitivo/raiz (body:a!, body:s)
+            location = "body"
+            name, treq, is_body = "", p.split(":", 1)[1], True
+        else:  # nome cru sem prefixo
+            location = "query"
+            name, _, treq = p.partition(":")
+            is_body = False
+
+        t = treq[0] if treq else "s"                      # tolera marcadores (~oneOf) no fim
+        req = len(treq) > 1 and treq[1] == "!"
+
         pdict = {
             "name": name,
             "type": exp_map.get(t, "string"),
             "required": req,
-            "is_body": is_body
+            "is_body": is_body,
+            "location": location,
         }
+        c = param_constraints.get(p, {})
+        if c.get("enum"):
+            pdict["enum"] = c["enum"]
+        if "default" in c:
+            pdict["default"] = c["default"]
+        if "minimum" in c:
+            pdict["minimum"] = c["minimum"]
+        if "maximum" in c:
+            pdict["maximum"] = c["maximum"]
+        if "minLength" in c:
+            pdict["minLength"] = c["minLength"]
+        if "maxLength" in c:
+            pdict["maxLength"] = c["maxLength"]
+        if "pattern" in c:
+            pdict["pattern"] = c["pattern"]
+        if "format" in c:
+            pdict["format"] = c["format"]
+
         if is_body:
             body.append(pdict)
         else:
             other.append(pdict)
-            
+
     return body, other
+
+def _format_constraint_hints(p):
+    hints = []
+    if p.get("enum"):
+        hints.append(f"enum: {p['enum']}")
+    if "default" in p:
+        hints.append(f"default: {p['default']}")
+    if "minimum" in p:
+        hints.append(f"min: {p['minimum']}")
+    if "maximum" in p:
+        hints.append(f"max: {p['maximum']}")
+    if "minLength" in p:
+        hints.append(f"minLength: {p['minLength']}")
+    if "maxLength" in p:
+        hints.append(f"maxLength: {p['maxLength']}")
+    if "pattern" in p:
+        hints.append(f"pattern: {p['pattern']}")
+    if "format" in p:
+        hints.append(f"format: {p['format']}")
+    return (" [" + ", ".join(hints) + "]") if hints else ""
 
 def render_contract(ops, namespace, auth, scope):
     out = []
@@ -78,17 +131,19 @@ def render_contract(ops, namespace, auth, scope):
         out.append(f"URL: {op.get('full_url')}")
         out.append(f"RESPONSES: {', '.join(op.get('responses', []))}")
         
-        body, other = parse_params(op.get("params_toon", []))
+        body, other = parse_params(op.get("params_toon", []), op.get("param_constraints", {}))
         if not body and not other:
             out.append("PARAMS: nenhum")
         else:
             out.append("PARAMS:")
             for p in other:
                 mark = "[obrigatório]" if p['required'] else "[opcional]"
-                out.append(f"  - (path/query) {p['name']}: {p['type']} {mark}")
+                extras = _format_constraint_hints(p)
+                out.append(f"  - ({p.get('location', 'query')}) {p['name']}: {p['type']} {mark}{extras}")
             for p in body:
                 mark = "[obrigatório]" if p['required'] else "[opcional]"
-                out.append(f"  - (body) {p['name']}: {p['type']} {mark}")
+                extras = _format_constraint_hints(p)
+                out.append(f"  - (body) {p['name']}: {p['type']} {mark}{extras}")
         out.append("...")
         
     out.append("---")
