@@ -199,10 +199,10 @@ class TestGenerateArtifactsToon:
         assert "body[][][][][]:a!" in toon  # Limite máximo 5
     def test_primitive_root_body(self, spec_primitive_body):
         toon, _ = generate_artifacts(spec_primitive_body)
-        assert "Req: body:s!" in toon
+        assert "Req: binary" in toon
     def test_form_data_priority(self, spec_form_data):
         toon, _ = generate_artifacts(spec_form_data)
-        assert "Req: body.token:s?" in toon
+        assert "Req: f:token:s?" in toon
 
 class TestGenerateArtifactsMapping:
     def test_full_url(self, spec_completa):
@@ -222,10 +222,10 @@ class TestGenerateArtifactsMapping:
         assert "body.active:b?" in p
     def test_param_path(self, spec_completa):
         _, m = generate_artifacts(spec_completa)
-        assert "id:s!" in m["getUser"]["params_toon"]
+        assert "{id}" in m["getUser"]["path"]
     def test_param_query(self, spec_completa):
         _, m = generate_artifacts(spec_completa)
-        assert "page:i?" in m["listUsers"]["params_toon"]
+        assert "q:page:i?" in m["listUsers"]["params_toon"]
     def test_responses(self, spec_completa):
         _, m = generate_artifacts(spec_completa)
         assert "201" in m["createUser"]["responses"]

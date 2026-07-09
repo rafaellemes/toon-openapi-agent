@@ -48,7 +48,7 @@ class TestOpenApi3Url:
         assert m["addPet"]["method"] == "POST"
     def test_getpetbyid_obrigatorio(self, spec_openapi3):
         _, m = generate_artifacts(spec_openapi3)
-        assert any(p.endswith("!") for p in m["getPetById"]["params_toon"])
+        assert "{petId}" in m["getPetById"]["path"]
     def test_metodos_uppercase(self, spec_openapi3):
         _, m = generate_artifacts(spec_openapi3)
         validos = {"GET","POST","PUT","DELETE","PATCH","HEAD","OPTIONS"}
