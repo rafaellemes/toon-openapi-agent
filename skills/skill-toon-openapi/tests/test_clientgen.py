@@ -61,7 +61,7 @@ class TestFilterOperations:
 class TestParseParams:
     def test_body_obrigatorio(self):
         body, _ = parse_params(["body.name:s!"])
-        assert body[0] == {"name":"name","type":"string","required":True,"is_body":True}
+        assert body[0] == {"name":"name","type":"string","required":True,"is_body":True,"location":"body"}
     def test_body_opcional(self):
         body, _ = parse_params(["body.status:s?"])
         assert body[0]["required"] is False
@@ -74,6 +74,16 @@ class TestParseParams:
         assert tipos == {"a":"string","b":"integer","c":"boolean","d":"array","e":"object"}
     def test_invalido_ignorado(self):
         assert parse_params(["invalido",""]) == ([],[])
+    def test_prefixo_path_nao_vira_nome(self):
+        _, other = parse_params(["p:txid:s!"])
+        assert other[0]["name"] == "txid" and other[0]["location"] == "path" and other[0]["required"]
+    def test_prefixos_location(self):
+        _, other = parse_params(["q:page:i?","h:X-Key:s!","c:sess:s?","f:file:s?"])
+        locs = {p["name"]: p["location"] for p in other}
+        assert locs == {"page":"query","X-Key":"header","sess":"cookie","file":"form"}
+    def test_marcador_nao_polui_tipo(self):
+        body, _ = parse_params(["body.devedor:o?~oneOf"])
+        assert body[0]["name"] == "devedor" and body[0]["type"] == "object" and not body[0]["required"]
 
 class TestRenderContract:
     def test_cabecalho(self, mapping):

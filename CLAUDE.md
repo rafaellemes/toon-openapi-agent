@@ -64,8 +64,31 @@ Each sub-skill has a `.md` instruction file (read by the LLM before execution) a
 
 - Types: `s`=string, `i`=integer, `b`=boolean, `a`=array, `o`=object
 - Markers: `!`=required, `?`=optional
-- Param prefixes: `q:`=query, `h:`=header, `c:`=cookie, `f:`=form, `body.`=JSON body field, `rh:`=response header
+- Param prefixes: `p:`=path, `q:`=query, `h:`=header, `c:`=cookie, `f:`=form, `body.`=JSON body field, `rh:`=response header
 - Special: `binary`=file upload, `stream`=SSE
+- Inline constraints (suffix `{...}` on each token in toon.txt only):
+  `enum:a|b|c` · `def:V` · `min:N` · `max:N` · `minLen:N` · `maxLen:N` · `fmt:X` · `mult:N` · `re:…` · `null`
+  Long enums truncated to 6 values (`…(+N)`). Full constraints live in `mapping.json` under
+  `param_constraints` and `response_constraints` (keyed by the raw token string). Always
+  query via `jq` — never `cat` the whole mapping.
+- Nesting: `body.a.b.c` = nested object; `body.arr[]` = array item; `body.map.{*}` =
+  free-form key (`additionalProperties`).
+- Node markers (token suffix): `~oneOf`/`~anyOf` = composition variants merged as optional;
+  `~circular` = circular ref halted; `~deep` = max depth reached.
+
+### toon.txt is compact; mapping.json is complete
+
+`transform_toon.py` uses a single recursive schema expander (`extract_properties` →
+`_expand`) that resolves `$ref` at ANY boundary (parameter, requestBody, response, header,
+schema, items, properties, additionalProperties, allOf/oneOf/anyOf members), merges `allOf`,
+merges `oneOf`/`anyOf` as optional variants, and recurses through nested objects/arrays with a
+path-scoped circular guard + depth cap (`_MAX_DEPTH`) + total-token cap (`_MAX_TOKENS`).
+
+The FULL recursive tree is stored in `mapping.json` (`params_toon`, `responses_toon`,
+`param_constraints`, `response_constraints`). The `toon.txt` renders a COMPACT projection —
+top-level fields only (`compact_tokens`, depth ≤ 1) with `…`, and non-2xx responses collapsed
+to status codes — to preserve the token-economy goal. Read full contracts from `mapping.json`
+via `jq`, not from `toon.txt`.
 
 ### Test structure
 

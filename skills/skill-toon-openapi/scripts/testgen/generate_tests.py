@@ -7,24 +7,35 @@ GENERATORS = {}
 EXTENSIONS = {"python": "py", "javascript": "js", "typescript": "ts", "kotlin": "kt", "go": "go", "ruby": "rb"}
 DEFAULT_FRAMEWORKS = {"python": "pytest", "javascript": "jest", "typescript": "jest", "kotlin": "junit5", "go": "testing", "ruby": "rspec"}
 
-def build_happy_payload(params_toon):
+def build_happy_payload(params_toon, param_constraints=None):
     payload = {}
+    if param_constraints is None:
+        param_constraints = {}
     for p in params_toon:
         if not p.startswith("body."):
             continue
         parts = p.split(":")
         name = parts[0][5:]
-        t = parts[1][0] if len(parts)>1 and len(parts[1])>0 else "s"
-        
-        # very simple mock
-        if t == "s": val = "string"
-        elif t == "i": val = 1
-        elif t == "b": val = True
-        elif t == "a": val = []
-        elif t == "o": val = {}
-        else: val = "str"
-        
-        # simple dot path for dict
+        t = parts[1][0] if len(parts) > 1 and len(parts[1]) > 0 else "s"
+
+        c = param_constraints.get(p, {})
+        if "enum" in c and c["enum"]:
+            val = c["enum"][0]
+        elif "default" in c:
+            val = c["default"]
+        elif t == "s":
+            val = "string" if "minLength" not in c else "a" * c["minLength"]
+        elif t == "i":
+            val = c.get("minimum", 1)
+        elif t == "b":
+            val = True
+        elif t == "a":
+            val = []
+        elif t == "o":
+            val = {}
+        else:
+            val = "str"
+
         keys = name.split(".")
         cur = payload
         for k in keys[:-1]:
@@ -32,19 +43,18 @@ def build_happy_payload(params_toon):
                 cur[k] = {}
             cur = cur[k]
         cur[keys[-1]] = val
-        
+
     return payload
 
-def build_missing_required_payload(params_toon):
-    p = build_happy_payload(params_toon)
+def build_missing_required_payload(params_toon, param_constraints=None):
+    p = build_happy_payload(params_toon, param_constraints)
     missing_name = None
-    
-    # acha primeiro obrigatorio
+
     for param in params_toon:
         if param.startswith("body.") and param.endswith("!"):
             missing_name = param.split(":")[0][5:]
             break
-            
+
     if missing_name:
         keys = missing_name.split(".")
         cur = p
@@ -52,12 +62,13 @@ def build_missing_required_payload(params_toon):
             cur = cur[k]
         if keys[-1] in cur:
             del cur[keys[-1]]
-            
+
     return p, missing_name
 
 def gen_python(entry, op_id, framework):
-    happy = build_happy_payload(entry["params_toon"])
-    missing, miss_name = build_missing_required_payload(entry["params_toon"])
+    pc = entry.get("param_constraints", {})
+    happy = build_happy_payload(entry["params_toon"], pc)
+    missing, miss_name = build_missing_required_payload(entry["params_toon"], pc)
     url = entry.get("full_url", "")
     code = f"import requests\n\ndef test_{op_id}_happy():\n    url = '{url}'\n    payload = {json.dumps(happy)}\n    resp = requests.{entry['method'].lower()}(url, json=payload)\n    assert resp.status_code == 200\n"
     if miss_name:

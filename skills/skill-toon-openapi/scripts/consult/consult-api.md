@@ -26,7 +26,19 @@ description: >
    `cat .toon_apis/apis/<ns>/toon.txt`
 3. **[INTERNO DA SKILL]** EXTRAIR dados técnicos do mapping.json — NUNCA de memória:
    `jq '.<operationId>' .toon_apis/apis/<ns>/mapping.json`
+   - O campo `param_constraints` (indexado por token, ex: `"body.status:s?"`) contém
+     `enum`, `default`, `minimum`, `maximum`, `maxLength`, `format`, etc.
+   - O campo `response_constraints` (indexado por status HTTP, depois por token) contém
+     as mesmas constraints para campos de resposta.
+   - **SEMPRE** usar `param_constraints` ao gerar código: respeitar enums, defaults e
+     limites. Ex: se `status` tem `enum: ["placed","approved","delivered"]`, o código
+     gerado deve usar apenas esses valores e validar/tipar conforme a linguagem.
 4. Gerar código idiomático com contexto resolvido.
+   - **Impor as constraints NO código** (validação client-side antes de enviar): enum,
+     pattern, min/max, minLength/maxLength, obrigatoriedade. Nunca só como comentário —
+     evita gastar requisição do bucket de rate-limit com um 400 previsível. Spring Boot →
+     Bean Validation (`@NotNull`/`@Size`/`@Pattern`/`@Min`/`@Max`/`@Valid`); Java puro →
+     guardas com `IllegalArgumentException`. Ver SKILL.md.
 5. Validar payload gerado (ver SKILL.md — Validação Automática).
 6. `python .claude/skills/toon-openapi/scripts/consult/log_metrics.py <ns> <tokens> consult`
 

@@ -34,6 +34,30 @@ Sem restrição de linguagem ou framework.
 - Código idiomático — sem restrição de linguagem.
 - `python .claude/skills/toon-openapi/scripts/consult/log_metrics.py <ns> <tokens> clientgen`
 
+## ⚠️ Constraints DEVEM ser IMPOSTAS no código (não apenas comentadas)
+
+O contrato traz constraints (`enum`, `pattern`, `min`/`max`, `minLength`/`maxLength`,
+`multipleOf`, `format`, obrigatoriedade). O código gerado **DEVE validar essas constraints
+client-side ANTES de enviar a requisição** — falhar cedo, localmente. Comentário descrevendo
+a constraint **não basta**.
+
+**Motivo:** disparar uma chamada que já se sabe inválida gasta uma requisição do *bucket* de
+rate-limit da API (crítico em APIs como o Pix) e desperdiça latência para receber um 400 certo.
+
+Aplicação por stack:
+- **Spring Boot / Java com Bean Validation:** anotar o modelo com Jakarta Validation —
+  `@NotNull`/`@NotBlank` (obrigatório), `@Size(min,max)` (minLength/maxLength), `@Pattern(regexp=...)`
+  (pattern), `@Min`/`@Max` ou `@DecimalMin`/`@DecimalMax` (min/max), `@Valid` em campos aninhados,
+  e `enum` Java para `enum`. Validar (`@Valid` no controller ou `Validator.validate(...)`) ANTES
+  de chamar a API.
+- **Java puro / sem framework:** guardas explícitas que lançam `IllegalArgumentException` antes
+  de montar/enviar (ex.: `Objects.requireNonNull`, checagem de tamanho, `Pattern.matches(regex, v)`,
+  `enum` Java, verificação de faixa numérica).
+- **Outras linguagens:** equivalente idiomático que imponha a constraint antes da chamada HTTP
+  (ex.: Pydantic/dataclass validators em Python, Zod/class-validator em TS, `validator` em Go).
+- **Enums:** modelar como tipo/enum de primeira classe sempre que a linguagem suportar.
+- Após gerar, validar o payload de exemplo com `validate_payload.py` (ver SKILL.md).
+
 
 ## Linguagem Cognitiva (Cognitive Language)
 Você deve pensar e responder ao usuário exatamente no mesmo idioma em que ele fez o prompt. Exemplo: Se o prompt for em Inglês, pense e responda em Inglês. Se for em Português do Brasil, pense e responda em Português do Brasil (PT-BR). Se for em Espanhol, etc.

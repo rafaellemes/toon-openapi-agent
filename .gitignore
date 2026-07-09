@@ -15,6 +15,7 @@ htmlcov/
 # TooN runtime data
 .toon_apis/
 
+
 # Temp files
 /tmp/*.json
 /tmp/*.yaml
@@ -30,3 +31,6 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local planning scratch (trackers de plano, não versionados)
+.claude/plans

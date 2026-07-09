@@ -82,6 +82,47 @@ class TestRecursao:
     def test_array_tipo_errado(self, entry_array):
         assert validate_payload(entry_array, {"users":"nao_array"})["hard_count"] >= 1
 
+class TestNovaGramatica:
+    """Tokens ricos: [] (item de array), {*} (mapa livre), prefixos não-body, marcadores."""
+
+    def _entry(self, tokens, constraints=None):
+        return {"method": "POST", "path": "/x", "full_url": "/x", "params_toon": tokens,
+                "param_constraints": constraints or {}, "summary": "", "responses": []}
+
+    def test_array_de_objetos_valida_itens(self):
+        entry = self._entry(["body.itens:a!", "body.itens[]:o!",
+                             "body.itens[].nome:s!", "body.itens[].valor:s!"])
+        # payload correto NÃO deve acusar falso "itens[] obrigatório ausente"
+        assert validate_payload(entry, {"itens": [{"nome": "a", "valor": "b"}]})["is_valid"]
+
+    def test_array_item_campo_obrigatorio_ausente(self):
+        entry = self._entry(["body.itens:a!", "body.itens[]:o!", "body.itens[].nome:s!"])
+        r = validate_payload(entry, {"itens": [{}]})
+        assert not r["is_valid"]
+        assert any("nome" in e["field"] for e in r["errors"] if "ERRO" in e["severity"])
+
+    def test_array_item_enum_por_constraint(self):
+        entry = self._entry(
+            ["body.itens:a!", "body.itens[]:o!", "body.itens[].tipo:s!"],
+            {"body.itens[].tipo:s!": {"enum": ["A", "B"]}})
+        r = validate_payload(entry, {"itens": [{"tipo": "X"}]})
+        assert not r["is_valid"]
+        assert any("enum" in e["error"] for e in r["errors"])
+
+    def test_prefixos_nao_body_ignorados(self):
+        entry = self._entry(["p:id:s!", "q:page:i?", "h:X-Key:s!", "body.nome:s!"])
+        assert validate_payload(entry, {"nome": "x"})["is_valid"]
+
+    def test_wildcard_map(self):
+        entry = self._entry(["body.meta:o?", "body.meta.{*}:s?"])
+        # mapa livre não deve quebrar; valores string ok
+        assert validate_payload(entry, {"meta": {"a": "1", "b": "2"}})["is_valid"]
+
+    def test_marcador_oneof_nao_quebra(self):
+        entry = self._entry(["body.devedor:o?~oneOf", "body.devedor.cpf:s?", "body.devedor.cnpj:s?"])
+        assert validate_payload(entry, {"devedor": {"cpf": "123"}})["is_valid"]
+
+
 class TestRenderValidationReport:
     def _r(self, is_valid, errors=None):
         errors = errors or []

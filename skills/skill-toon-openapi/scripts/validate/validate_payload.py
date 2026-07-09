@@ -4,59 +4,88 @@ from pathlib import Path
 import time
 import argparse
 
+# Prefixos de parâmetros que NÃO fazem parte do corpo JSON (path/query/header/cookie/form).
+_NON_BODY_PREFIXES = ("p:", "q:", "h:", "c:", "f:")
+
 def parse_params_toon(params_toon):
+    """Faz o parse dos tokens do corpo. Ignora params não-body e tolera marcadores (~oneOf...)."""
     parsed = []
     for p in params_toon:
-        # e.g., "body.email:s!" or "id:i?"
-        if ":" not in p:
+        if ":" not in p or p.startswith(_NON_BODY_PREFIXES):
             continue
-        parts = p.split(":")
-        name_part = parts[0]
-        type_req = parts[1]
-        
+        # nome antes do primeiro ':'; o resto é tipo+marcador (ex: "o?~oneOf")
+        name_part, type_req = p.split(":", 1)
+
         prefix = None
         name = name_part
-        if name_part.startswith("body."):
-            prefix = "body"
-            name = name_part[5:]
-            
-        t = type_req[0] if len(type_req) > 0 else "s"
-        req = False
-        if len(type_req) > 1 and type_req[1] == "!":
-            req = True
-            
+        if name_part == "body":
+            prefix, name = "body", ""          # raiz do corpo (ex: body:a!)
+        elif name_part.startswith("body."):
+            prefix, name = "body", name_part[5:]
+
+        t = type_req[0] if type_req else "s"
+        req = len(type_req) > 1 and type_req[1] == "!"
+
         parsed.append({
             "name": name,
             "prefix": prefix,
             "type": t,
             "required": req,
             "is_body": prefix == "body",
-            "token": p
+            "token": p,
         })
     return parsed
 
+def _new_node():
+    return {"type": None, "required": False, "token": "", "children": {}, "items": None, "wild": None}
+
+def _parse_steps(name):
+    """Converte o caminho de um token em passos de navegação.
+    Passos: ('field', nome) | ('items',) [array] | ('wild',) [additionalProperties {*}].
+    Ex: 'infoAdicionais[].nome' -> field infoAdicionais, items, field nome."""
+    steps = []
+    if not name:
+        return steps
+    for part in name.split("."):
+        if part == "{*}":
+            steps.append(("wild",))
+            continue
+        base = part
+        arrays = 0
+        while base.endswith("[]"):
+            base = base[:-2]
+            arrays += 1
+        if base:
+            steps.append(("field", base))
+        for _ in range(arrays):
+            steps.append(("items",))
+    return steps
+
 def build_schema_tree(parsed_params):
-    tree = {}
+    """Árvore de schema entendendo objetos aninhados, arrays ([]) e mapas livres ({*})."""
+    root = _new_node()
+    root["type"] = "o"
     for p in parsed_params:
         if not p["is_body"]:
             continue
-            
-        parts = p["name"].split(".")
-        current = tree
-        for part in parts[:-1]:
-            if part not in current:
-                current[part] = {"type": "o", "properties": {}, "required": False}
-            elif "properties" not in current[part]:
-                current[part]["properties"] = {}
-            current = current[part]["properties"]
-            
-        leaf_name = parts[-1]
-        current[leaf_name] = {
-            "type": p["type"],
-            "required": p["required"],
-            "token": p["token"]
-        }
-    return tree
+        steps = _parse_steps(p["name"])
+        node = root
+        for i, step in enumerate(steps):
+            kind = step[0]
+            if kind == "field":
+                node = node["children"].setdefault(step[1], _new_node())
+            elif kind == "items":
+                if node["items"] is None:
+                    node["items"] = _new_node()
+                node = node["items"]
+            elif kind == "wild":
+                if node["wild"] is None:
+                    node["wild"] = _new_node()
+                node = node["wild"]
+        node["type"] = p["type"]
+        node["required"] = p["required"]
+        node["token"] = p["token"]
+    return root
 
 def validate_types_strict(val, t):
     if t == "s":
@@ -71,51 +100,103 @@ def validate_types_strict(val, t):
         return isinstance(val, dict)
     return True
 
-def _validate_node(schema_node, val, path, depth, max_depth, errors):
-    if depth > max_depth:
-        errors.append({"field": path, "token": "", "error": "Objeto aninhado além de max_depth", "severity": "⚪ INFO"})
-        return
-        
-    for k, v in schema_node.items():
-        sub_path = f"{path}.{k}" if path else k
-        
-        if k not in val:
-            if v.get("required"):
-                errors.append({"field": sub_path, "token": v.get("token", ""), "error": "campo obrigatório ausente", "severity": "🔴 ERRO"})
-            continue
-            
-        field_val = val[k]
-        
-        # Verify type
-        expected_type = v.get("type", "s")
-        if not validate_types_strict(field_val, expected_type):
-            errors.append({"field": sub_path, "token": v.get("token", ""), "error": f"tipo incorreto, esperado {expected_type}", "severity": "🔴 ERRO"})
-            continue
-            
-        if expected_type == "o" and isinstance(field_val, dict) and "properties" in v:
-            _validate_node(v["properties"], field_val, sub_path, depth + 1, max_depth, errors)
-            
-        if expected_type == "a" and isinstance(field_val, list):
-            # Valida só primeiros 3
-            pass
+def validate_constraint(val, c, field, token, errors):
+    """Valida ``val`` contra as constraints ``c``. Enum = ERRO, demais = AVISO."""
+    import re as _re
+    if "enum" in c and val not in c["enum"]:
+        errors.append({"field": field, "token": token,
+                        "error": f"valor '{val}' não está no enum permitido: {c['enum']}",
+                        "severity": "🔴 ERRO"})
+    if "minimum" in c and isinstance(val, (int, float)) and val < c["minimum"]:
+        errors.append({"field": field, "token": token,
+                        "error": f"valor {val} abaixo do mínimo permitido ({c['minimum']})",
+                        "severity": "🟡 AVISO"})
+    if "maximum" in c and isinstance(val, (int, float)) and val > c["maximum"]:
+        errors.append({"field": field, "token": token,
+                        "error": f"valor {val} acima do máximo permitido ({c['maximum']})",
+                        "severity": "🟡 AVISO"})
+    if "minLength" in c and isinstance(val, str) and len(val) < c["minLength"]:
+        errors.append({"field": field, "token": token,
+                        "error": f"string com {len(val)} chars abaixo do minLength ({c['minLength']})",
+                        "severity": "🟡 AVISO"})
+    if "maxLength" in c and isinstance(val, str) and len(val) > c["maxLength"]:
+        errors.append({"field": field, "token": token,
+                        "error": f"string com {len(val)} chars acima do maxLength ({c['maxLength']})",
+                        "severity": "🟡 AVISO"})
+    if "pattern" in c and isinstance(val, str) and not _re.search(c["pattern"], val):
+        errors.append({"field": field, "token": token,
+                        "error": f"valor '{val}' não bate com o pattern '{c['pattern']}'",
+                        "severity": "🟡 AVISO"})
+    if "multipleOf" in c and isinstance(val, (int, float)) and c["multipleOf"] and val % c["multipleOf"] != 0:
+        errors.append({"field": field, "token": token,
+                        "error": f"valor {val} não é múltiplo de {c['multipleOf']}",
+                        "severity": "🟡 AVISO"})
 
-    for k in val:
-        if k not in schema_node:
-            sub_path = f"{path}.{k}" if path else k
-            errors.append({"field": sub_path, "token": "", "error": "campo extra não no contrato", "severity": "🟡 AVISO"})
+def _is_container(node):
+    return bool(node["children"] or node["items"] is not None or node["wild"] is not None)
+
+def _validate(node, value, path, cmap, errors, depth, max_depth):
+    """Valida ``value`` contra ``node`` (objeto/array/mapa/leaf), aplicando constraints."""
+    t = node.get("type")
+    if t and value is not None and not validate_types_strict(value, t):
+        errors.append({"field": path or "body", "token": node.get("token", ""),
+                        "error": f"tipo incorreto, esperado {t}", "severity": "🔴 ERRO"})
+        return
+
+    # Constraints (apenas em valores escalares — objetos/arrays não têm enum/min/etc.)
+    tok = node.get("token")
+    if tok and tok in cmap and not isinstance(value, (dict, list)):
+        validate_constraint(value, cmap[tok], path or "body", tok, errors)
+
+    # Objeto
+    if node["children"] and isinstance(value, dict):
+        for cname, cnode in node["children"].items():
+            sub = f"{path}.{cname}" if path else cname
+            if cname not in value:
+                if cnode["required"]:
+                    errors.append({"field": sub, "token": cnode.get("token", ""),
+                                    "error": "campo obrigatório ausente", "severity": "🔴 ERRO"})
+                continue
+            if _is_container(cnode) and depth + 1 > max_depth:
+                errors.append({"field": sub, "token": "", "error": "aninhado além de max_depth",
+                                "severity": "⚪ INFO"})
+                continue
+            _validate(cnode, value[cname], sub, cmap, errors, depth + 1, max_depth)
+        for k in value:
+            if k not in node["children"]:
+                sub = f"{path}.{k}" if path else k
+                errors.append({"field": sub, "token": "", "error": "campo extra não no contrato",
+                                "severity": "🟡 AVISO"})
+
+    # Array — valida os primeiros itens contra o schema do item
+    if node["items"] is not None and isinstance(value, list):
+        if depth + 1 > max_depth:
+            errors.append({"field": path, "token": "", "error": "array aninhado além de max_depth",
+                            "severity": "⚪ INFO"})
+        else:
+            for idx, el in enumerate(value[:3]):
+                _validate(node["items"], el, f"{path}[{idx}]", cmap, errors, depth + 1, max_depth)
+
+    # Mapa livre (additionalProperties)
+    if node["wild"] is not None and isinstance(value, dict):
+        if depth + 1 <= max_depth:
+            for k, v in list(value.items())[:5]:
+                sub = f"{path}.{k}" if path else k
+                _validate(node["wild"], v, sub, cmap, errors, depth + 1, max_depth)
 
 
 def validate_payload(entry, payload, max_depth=3):
     parsed = parse_params_toon(entry.get("params_toon", []))
     tree = build_schema_tree(parsed)
+    cmap = entry.get("param_constraints", {}) or {}
     errors = []
-    
-    if not isinstance(payload, dict):
-        if tree:
-            errors.append({"field": "body", "token": "", "error": "Payload não é um objeto JSON", "severity": "🔴 ERRO"})
-    else:
-        _validate_node(tree, payload, "", 0, max_depth, errors)
-        
+
+    has_body = _is_container(tree) or (tree.get("type") not in (None, "o"))
+    if isinstance(payload, dict) or (tree.get("type") == "a" and isinstance(payload, list)):
+        _validate(tree, payload, "", cmap, errors, 0, max_depth)
+    elif has_body:
+        errors.append({"field": "body", "token": "", "error": "Payload não é um objeto JSON", "severity": "🔴 ERRO"})
+
     hard_count = len([e for e in errors if "ERRO" in e["severity"]])
     warn_count = len([e for e in errors if "AVISO" in e["severity"]])
     info_count = len([e for e in errors if "INFO" in e["severity"]])
